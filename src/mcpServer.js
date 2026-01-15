@@ -1,13 +1,16 @@
 import Ajv from 'ajv';
-import fetch from 'node-fetch';
+import logger from './logger.js';
 
 const ajv = new Ajv();
 
 export class McpServer {
-  constructor(baseUrl) {
+  constructor(baseUrl, config = {}) {
     this.baseUrl = baseUrl;
     this.tools = [];
     this.openapi = null;
+    this.config = {
+      strict: config.strict ?? false  // If true, validation errors stop execution
+    };
   }
 
   setOpenApiSpec(spec) {
@@ -35,16 +38,39 @@ export class McpServer {
     if (!tool) throw new Error('Tool not found');
 
     if (tool.validate) {
-      try {
-        if (!tool.validate(args)) {
-          throw new Error(`Validation failed: ${JSON.stringify(tool.validate.errors)}`);
+      const valid = tool.validate(args);
+      if (!valid) {
+        const errorMsg = `Validation failed: ${JSON.stringify(tool.validate.errors)}`;
+        if (this.config.strict) {
+          throw new Error(errorMsg);
+        } else {
+          logger.debug(`Validation warning: ${errorMsg}. Proceeding anyway.`);
         }
-      } catch (err) {
-        console.warn(`Validation warning: ${err.message}. Proceeding anyway.`);
       }
     }
 
-    const res = await fetch(this.baseUrl + tool.path, {
+    // Substitute path parameters
+    let url = this.baseUrl + tool.path;
+    const pathParams = new Set();
+    url = url.replace(/{([^}]+)}/g, (match, paramName) => {
+      pathParams.add(paramName);
+      return args[paramName] !== undefined ? args[paramName] : match;
+    });
+
+    // Build query string for GET requests
+    if (tool.method === 'GET') {
+      const queryParams = new URLSearchParams();
+      for (const [key, value] of Object.entries(args)) {
+        if (!pathParams.has(key)) {
+          queryParams.append(key, value);
+        }
+      }
+      if (queryParams.toString()) {
+        url += '?' + queryParams.toString();
+      }
+    }
+
+    const res = await fetch(url, {
       method: tool.method,
       headers: {
         'Content-Type': 'application/json',
@@ -52,6 +78,11 @@ export class McpServer {
       },
       body: tool.method === 'GET' ? undefined : JSON.stringify(args)
     });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`HTTP ${res.status} ${res.statusText}: ${errorText}`);
+    }
 
     return res.json();
   }

@@ -10,6 +10,13 @@ const groq = new Groq({
 export function startChat(mcp) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   let conversationHistory = [];
+  const MAX_HISTORY_LENGTH = 50; // Keep only the last 50 messages to prevent unbounded growth
+
+  function trimHistory() {
+    if (conversationHistory.length > MAX_HISTORY_LENGTH) {
+      conversationHistory = conversationHistory.slice(-MAX_HISTORY_LENGTH);
+    }
+  }
 
   async function loop() {
     rl.question('> ', async (input) => {
@@ -18,6 +25,7 @@ export function startChat(mcp) {
           role: 'user',
           content: input
         });
+        trimHistory();
 
         // Build tool descriptions
         const toolsList = mcp.listTools().map(t => 
@@ -112,22 +120,26 @@ export function startChat(mcp) {
                 role: 'assistant',
                 content: msg.content
               });
+              trimHistory();
               
               conversationHistory.push({
                 role: 'user',
                 content: `Tool execution successful. Result from ${toolCall.name}: ${JSON.stringify(result)}`
               });
+              trimHistory();
             } catch (toolError) {
               logger.error(`Tool execution failed: ${toolError.message}`);
               conversationHistory.push({
                 role: 'assistant',
                 content: msg.content
               });
+              trimHistory();
               
               conversationHistory.push({
                 role: 'user',
                 content: `Tool execution failed: ${toolError.message}`
               });
+              trimHistory();
             }
           }
         } else {
@@ -136,6 +148,7 @@ export function startChat(mcp) {
             role: 'assistant',
             content: msg.content
           });
+          trimHistory();
         }
 
         // Extract and display only the human-friendly response

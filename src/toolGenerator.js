@@ -1,3 +1,15 @@
+function hasUnresolvedRefs(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  
+  if (obj.$ref) return true;
+  
+  for (const value of Object.values(obj)) {
+    if (hasUnresolvedRefs(value)) return true;
+  }
+  
+  return false;
+}
+
 export function generateTools(openapi) {
   const tools = [];
   for (const [path, methods] of Object.entries(openapi.paths)) {
@@ -5,14 +17,14 @@ export function generateTools(openapi) {
       const schema = op.requestBody?.content?.['application/json']?.schema;
       
       // Check if schema has unresolved references, skip validation if it does
-      const hasUnresolvedRefs = schema && JSON.stringify(schema).includes('$ref');
+      const shouldSkipValidation = schema && hasUnresolvedRefs(schema);
       
       tools.push({
         name: op.operationId,
         description: op.summary || `${method.toUpperCase()} ${path}`,
         method: method.toUpperCase(),
         path,
-        schema: hasUnresolvedRefs ? null : schema
+        schema: shouldSkipValidation ? null : schema
       });
     }
   }
