@@ -1,53 +1,62 @@
-import Ajv from 'ajv';
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import logger from './logger.js';
 
-const ajv = new Ajv();
 
 export class McpServer {
-  constructor(baseUrl, config = {}) {
+  constructor(baseUrl) {
     this.baseUrl = baseUrl;
+    this.server = new Server(
+      {
+        name: "openapi-mcp-server",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
     this.tools = [];
-    this.openapi = null;
-    this.config = {
-      strict: config.strict ?? false  // If true, validation errors stop execution
-    };
+
+    // Set up request handlers
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      return {
+        tools: this.tools.map(t => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: t.schema || { type: 'object' }
+        }))
+      };
+    });
+
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const toolName = request.params.name;
+      const args = request.params.arguments || {};
+
+      const tool = this.tools.find(t => t.name === toolName);
+      if (!tool) {
+        throw new Error(`Tool not found: ${toolName}`);
+      }
+
+      return this.executeTool(tool, args);
+    });
   }
 
   setOpenApiSpec(spec) {
     this.openapi = spec;
-    ajv.addMetaSchema(spec);
   }
 
   registerTools(tools) {
-    this.tools = tools.map(t => ({
-      ...t,
-      validate: t.schema ? ajv.compile(t.schema) : null
-    }));
+    this.tools = tools;
   }
 
-  listTools() {
-    return this.tools.map(t => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.schema || { type: 'object' }
-    }));
-  }
-
-  async execute(name, args) {
-    const tool = this.tools.find(t => t.name === name);
-    if (!tool) throw new Error('Tool not found');
-
-    if (tool.validate) {
-      const valid = tool.validate(args);
-      if (!valid) {
-        const errorMsg = `Validation failed: ${JSON.stringify(tool.validate.errors)}`;
-        if (this.config.strict) {
-          throw new Error(errorMsg);
-        } else {
-          logger.debug(`Validation warning: ${errorMsg}. Proceeding anyway.`);
-        }
-      }
-    }
+  async executeTool(tool, args) {
+    logger.info(`Executing tool: ${tool.name} with args: ${JSON.stringify(args)}`);
 
     // Substitute path parameters
     let url = this.baseUrl + tool.path;
@@ -58,32 +67,62 @@ export class McpServer {
     });
 
     // Build query string for GET requests
+    let options = {
+      method: tool.method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': process.env.API_KEY || ''
+      }
+    };
+
     if (tool.method === 'GET') {
       const queryParams = new URLSearchParams();
       for (const [key, value] of Object.entries(args)) {
         if (!pathParams.has(key)) {
-          queryParams.append(key, value);
+          queryParams.append(key, String(value));
         }
       }
       if (queryParams.toString()) {
         url += '?' + queryParams.toString();
       }
+    } else {
+      options.body = JSON.stringify(args);
     }
 
-    const res = await fetch(url, {
-      method: tool.method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': process.env.API_KEY || ''
-      },
-      body: tool.method === 'GET' ? undefined : JSON.stringify(args)
-    });
+    try {
+      const res = await fetch(url, options);
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`HTTP ${res.status} ${res.statusText}: ${errorText}`);
+      if (!res.ok) {
+        const errorText = await res.text();
+        return {
+          content: [{
+            type: "text",
+            text: `HTTP Error ${res.status}: ${errorText}`
+          }],
+          isError: true
+        };
+      }
+
+      const data = await res.json();
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(data, null, 2)
+        }]
+      };
+    } catch (error) {
+      logger.error(`Error executing tool ${tool.name}: ${error.message}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error: ${error.message}`
+        }],
+        isError: true
+      };
     }
+  }
 
-    return res.json();
+  async connect(transport) {
+    await this.server.connect(transport);
   }
 }

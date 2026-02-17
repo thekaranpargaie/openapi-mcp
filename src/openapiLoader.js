@@ -1,5 +1,5 @@
 import fs from 'fs';
-import fetch from 'node-fetch';
+
 
 export async function loadSpec(path) {
   // If path is a URL, fetch it; otherwise read from file
