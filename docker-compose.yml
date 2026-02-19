@@ -21,7 +21,6 @@ services:
       - TRANSPORT_MODE=http
       - OPENAPI_SPEC_URL=http://test-api:8002/openapi.json
       - API_BASE_URL=http://test-api:8002
-      - GROQ_API_KEY=${GROQ_API_KEY}
     depends_on:
       - test-api
     networks:
