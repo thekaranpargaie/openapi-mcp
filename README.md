@@ -1,6 +1,8 @@
 # OpenAPI → MCP Server
 
 A lightweight **Model Context Protocol (MCP) server** that dynamically converts any OpenAPI v3 spec into MCP tools. Point it at an OpenAPI spec and any MCP-compatible AI client can discover and call your API endpoints automatically.
+<img width="1024" height="698" alt="openapi-mcp" src="https://github.com/user-attachments/assets/9303504f-bbaa-43b3-aecb-c18010818998" />
+
 
 ## What it does
 
